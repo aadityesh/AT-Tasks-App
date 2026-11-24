@@ -1,0 +1,2771 @@
+{
+  "info": {
+    "name": "Task Manager API (hardened)",
+    "description": "Requests for every endpoint in the brief, including the edge cases the first AI-generated checklist missed (see TESTING.md).\n\nRun top to bottom with the Collection Runner against a running server. Ids are stored in collection variables. A collection-level test checks the error shape on every 4xx/5xx response.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://127.0.0.1:8000/api"
+    },
+    {
+      "key": "runId",
+      "value": ""
+    },
+    {
+      "key": "taskId",
+      "value": ""
+    },
+    {
+      "key": "subtaskId",
+      "value": ""
+    },
+    {
+      "key": "lonelyId",
+      "value": ""
+    },
+    {
+      "key": "sandwichId",
+      "value": ""
+    },
+    {
+      "key": "nlTaskId",
+      "value": ""
+    },
+    {
+      "key": "breakdownIds",
+      "value": ""
+    },
+    {
+      "key": "breakdownId0",
+      "value": ""
+    },
+    {
+      "key": "idemTaskId",
+      "value": ""
+    },
+    {
+      "key": "idemNlId",
+      "value": ""
+    }
+  ],
+  "event": [
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Runs after every request: every 4xx/5xx must use the standard error shape.",
+          "if (pm.response.code >= 400) {",
+          "  pm.test('[shape] error body is {error: {code, message, details}}', () => {",
+          "    let b;",
+          "    pm.expect(() => { b = pm.response.json(); }, 'body is JSON').to.not.throw();",
+          "    pm.expect(b).to.have.property('error');",
+          "    pm.expect(b.error.code, 'code').to.be.a('string');",
+          "    pm.expect(b.error.message, 'message').to.be.a('string');",
+          "    pm.expect(b.error.details, 'details').to.be.an('array');",
+          "  });",
+          "}",
+          "pm.test('[global] no unhandled 500', () => pm.expect(pm.response.code).to.not.eql(500));"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "00 Setup",
+      "description": "Creates the main task used by later folders. Run the collection top to bottom.",
+      "item": [
+        {
+          "name": "Create main task",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Plan trip\",\n  \"description\": \"Book flights, reserve hotel and pack bags\",\n  \"due_date\": \"2026-12-01\",\n  \"priority\": \"high\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('runId', Date.now().toString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "let b = {}; try { b = pm.response.json(); } catch (e) { /* non-JSON body: tests below fail */ }",
+                  "const t = b.task;",
+                  "pm.test('Defaults applied', () => { pm.expect(t.completed).to.eql(false); pm.expect(t.parent).to.eql(null); });",
+                  "pm.test('Fields echoed', () => { pm.expect(t.priority).to.eql('high'); pm.expect(t.due_date).to.eql('2026-12-01'); });",
+                  "pm.test('created_at / updated_at are datetimes (DateTimeField)', () => { pm.expect(t.created_at).to.match(/T\\d{2}:\\d{2}/); pm.expect(t.updated_at).to.match(/T\\d{2}:\\d{2}/); });",
+                  "pm.collectionVariables.set('taskId', t.id);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "01 CRUD happy path",
+      "description": "Every CRUD endpoint once with valid input.",
+      "item": [
+        {
+          "name": "List tasks (paginated)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/tasks/"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "let b = {}; try { b = pm.response.json(); } catch (e) { /* non-JSON body: tests below fail */ }",
+                  "pm.test('Paginated shape', () => { pm.expect(b).to.have.keys('count','next','previous','results'); pm.expect(b.results).to.be.an('array'); });",
+                  "pm.test('Page size is at most 10', () => pm.expect(b.results.length).to.be.at.most(10));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Retrieve task",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/tasks/{{taskId}}/"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "let b = {}; try { b = pm.response.json(); } catch (e) { /* non-JSON body: tests below fail */ }",
+                  "pm.test('Correct task', () => pm.expect(b.task.id).to.eql(Number(pm.collectionVariables.get('taskId'))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Replace task (PUT)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/{{taskId}}/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Plan trip v2\",\n  \"description\": \"Book flights, reserve hotel and pack bags\",\n  \"completed\": false,\n  \"due_date\": \"2026-12-05\",\n  \"priority\": \"high\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "let b = {}; try { b = pm.response.json(); } catch (e) { /* non-JSON body: tests below fail */ }",
+                  "pm.test('Title replaced', () => pm.expect(b.task.title).to.eql('Plan trip v2'));",
+                  "pm.test('Due date replaced', () => pm.expect(b.task.due_date).to.eql('2026-12-05'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Partial update (PATCH completed)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/{{taskId}}/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"completed\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "let b = {}; try { b = pm.response.json(); } catch (e) { /* non-JSON body: tests below fail */ }",
+                  "pm.test('Marked completed', () => pm.expect(b.task.completed).to.eql(true));",
+                  "pm.test('Other fields untouched', () => pm.expect(b.task.title).to.eql('Plan trip v2'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Partial update (PATCH back to not completed)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/{{taskId}}/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"completed\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "let b = {}; try { b = pm.response.json(); } catch (e) { /* non-JSON body: tests below fail */ }",
+                  "pm.test('Not completed', () => pm.expect(b.task.completed).to.eql(false));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create with valid leap day 2028-02-29 (boundary)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Leap day\",\n  \"description\": \"Real date must be accepted\",\n  \"due_date\": \"2028-02-29\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "let b = {}; try { b = pm.response.json(); } catch (e) { /* non-JSON body: tests below fail */ }",
+                  "pm.test('Date kept', () => pm.expect(b.task.due_date).to.eql('2028-02-29'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 Validation errors (400)",
+      "description": "Every rule from Step 3. Each must return 400 in the standard error shape.",
+      "item": [
+        {
+          "name": "Empty title",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"\",\n  \"description\": \"x\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error.code is VALIDATION_ERROR', () => pm.expect(pm.response.json().error.code).to.eql('VALIDATION_ERROR'));",
+                  "pm.test('details mention field \"title\"', () => pm.expect(pm.response.json().error.details.map(d => d.field)).to.include('title'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Whitespace-only title",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"   \",\n  \"description\": \"x\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error.code is VALIDATION_ERROR', () => pm.expect(pm.response.json().error.code).to.eql('VALIDATION_ERROR'));",
+                  "pm.test('details mention field \"title\"', () => pm.expect(pm.response.json().error.details.map(d => d.field)).to.include('title'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Missing title",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"description\": \"No title\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error.code is VALIDATION_ERROR', () => pm.expect(pm.response.json().error.code).to.eql('VALIDATION_ERROR'));",
+                  "pm.test('details mention field \"title\"', () => pm.expect(pm.response.json().error.details.map(d => d.field)).to.include('title'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Empty description",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"x\",\n  \"description\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error.code is VALIDATION_ERROR', () => pm.expect(pm.response.json().error.code).to.eql('VALIDATION_ERROR'));",
+                  "pm.test('details mention field \"description\"', () => pm.expect(pm.response.json().error.details.map(d => d.field)).to.include('description'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Missing description",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"x\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error.code is VALIDATION_ERROR', () => pm.expect(pm.response.json().error.code).to.eql('VALIDATION_ERROR'));",
+                  "pm.test('details mention field \"description\"', () => pm.expect(pm.response.json().error.details.map(d => d.field)).to.include('description'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Title longer than 200 chars",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\n  \"description\": \"x\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error.code is VALIDATION_ERROR', () => pm.expect(pm.response.json().error.code).to.eql('VALIDATION_ERROR'));",
+                  "pm.test('details mention field \"title\"', () => pm.expect(pm.response.json().error.details.map(d => d.field)).to.include('title'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "completed is a string \"yes\"",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"x\",\n  \"description\": \"x\",\n  \"completed\": \"yes\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error.code is VALIDATION_ERROR', () => pm.expect(pm.response.json().error.code).to.eql('VALIDATION_ERROR'));",
+                  "pm.test('details mention field \"completed\"', () => pm.expect(pm.response.json().error.details.map(d => d.field)).to.include('completed'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "completed is a number 1",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"x\",\n  \"description\": \"x\",\n  \"completed\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error.code is VALIDATION_ERROR', () => pm.expect(pm.response.json().error.code).to.eql('VALIDATION_ERROR'));",
+                  "pm.test('details mention field \"completed\"', () => pm.expect(pm.response.json().error.details.map(d => d.field)).to.include('completed'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Impossible date 2026-02-30",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"x\",\n  \"description\": \"x\",\n  \"due_date\": \"2026-02-30\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error.code is VALIDATION_ERROR', () => pm.expect(pm.response.json().error.code).to.eql('VALIDATION_ERROR'));",
+                  "pm.test('details mention field \"due_date\"', () => pm.expect(pm.response.json().error.details.map(d => d.field)).to.include('due_date'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Impossible month 2026-13-01",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"x\",\n  \"description\": \"x\",\n  \"due_date\": \"2026-13-01\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error.code is VALIDATION_ERROR', () => pm.expect(pm.response.json().error.code).to.eql('VALIDATION_ERROR'));",
+                  "pm.test('details mention field \"due_date\"', () => pm.expect(pm.response.json().error.details.map(d => d.field)).to.include('due_date'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Wrong date format 01-12-2026",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"x\",\n  \"description\": \"x\",\n  \"due_date\": \"01-12-2026\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error.code is VALIDATION_ERROR', () => pm.expect(pm.response.json().error.code).to.eql('VALIDATION_ERROR'));",
+                  "pm.test('details mention field \"due_date\"', () => pm.expect(pm.response.json().error.details.map(d => d.field)).to.include('due_date'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Priority not allowed (urgent)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"x\",\n  \"description\": \"x\",\n  \"priority\": \"urgent\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error.code is VALIDATION_ERROR', () => pm.expect(pm.response.json().error.code).to.eql('VALIDATION_ERROR'));",
+                  "pm.test('details mention field \"priority\"', () => pm.expect(pm.response.json().error.details.map(d => d.field)).to.include('priority'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Priority wrong case (HIGH)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"x\",\n  \"description\": \"x\",\n  \"priority\": \"HIGH\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error.code is VALIDATION_ERROR', () => pm.expect(pm.response.json().error.code).to.eql('VALIDATION_ERROR'));",
+                  "pm.test('details mention field \"priority\"', () => pm.expect(pm.response.json().error.details.map(d => d.field)).to.include('priority'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Several errors at once",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"\",\n  \"description\": \"x\",\n  \"due_date\": \"2026-02-30\",\n  \"priority\": \"urgent\",\n  \"completed\": \"yes\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error.code is VALIDATION_ERROR', () => pm.expect(pm.response.json().error.code).to.eql('VALIDATION_ERROR'));",
+                  "pm.test('One detail per bad field', () => pm.expect(pm.response.json().error.details.map(d => d.field)).to.include.members(['title','due_date','priority','completed']));",
+                  "pm.test('Each detail has field and issue strings', () => pm.response.json().error.details.forEach(d => { pm.expect(d.field).to.be.a('string'); pm.expect(d.issue).to.be.a('string'); }));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Malformed JSON body",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"title\": \"x\", ",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT missing required fields",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/{{taskId}}/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"completed\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error.code is VALIDATION_ERROR', () => pm.expect(pm.response.json().error.code).to.eql('VALIDATION_ERROR'));",
+                  "pm.test('details mention field \"title\"', () => pm.expect(pm.response.json().error.details.map(d => d.field)).to.include('title'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH with invalid priority",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/{{taskId}}/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"priority\": \"urgent\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error.code is VALIDATION_ERROR', () => pm.expect(pm.response.json().error.code).to.eql('VALIDATION_ERROR'));",
+                  "pm.test('details mention field \"priority\"', () => pm.expect(pm.response.json().error.details.map(d => d.field)).to.include('priority'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH with impossible date",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/{{taskId}}/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"due_date\": \"2026-02-30\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error.code is VALIDATION_ERROR', () => pm.expect(pm.response.json().error.code).to.eql('VALIDATION_ERROR'));",
+                  "pm.test('details mention field \"due_date\"', () => pm.expect(pm.response.json().error.details.map(d => d.field)).to.include('due_date'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03 Unknown ids (404)",
+      "description": "Unknown id on every verb and every detail route.",
+      "item": [
+        {
+          "name": "GET unknown id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/tasks/999999/"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 404', () => pm.response.to.have.status(404));",
+                  "pm.test('error.code is NOT_FOUND', () => pm.expect(pm.response.json().error.code).to.eql('NOT_FOUND'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT unknown id",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/999999/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"x\",\n  \"description\": \"x\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 404', () => pm.response.to.have.status(404));",
+                  "pm.test('error.code is NOT_FOUND', () => pm.expect(pm.response.json().error.code).to.eql('NOT_FOUND'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH unknown id",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/999999/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"completed\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 404', () => pm.response.to.have.status(404));",
+                  "pm.test('error.code is NOT_FOUND', () => pm.expect(pm.response.json().error.code).to.eql('NOT_FOUND'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "DELETE unknown id",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/tasks/999999/"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 404', () => pm.response.to.have.status(404));",
+                  "pm.test('error.code is NOT_FOUND', () => pm.expect(pm.response.json().error.code).to.eql('NOT_FOUND'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET subtasks of unknown id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/tasks/999999/subtasks/"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 404', () => pm.response.to.have.status(404));",
+                  "pm.test('error.code is NOT_FOUND', () => pm.expect(pm.response.json().error.code).to.eql('NOT_FOUND'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST subtask to unknown id",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/999999/subtasks/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"x\",\n  \"description\": \"x\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 404', () => pm.response.to.have.status(404));",
+                  "pm.test('error.code is NOT_FOUND', () => pm.expect(pm.response.json().error.code).to.eql('NOT_FOUND'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Breakdown unknown id",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/tasks/999999/breakdown/"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 404', () => pm.response.to.have.status(404));",
+                  "pm.test('error.code is NOT_FOUND', () => pm.expect(pm.response.json().error.code).to.eql('NOT_FOUND'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Non-numeric id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/tasks/abc/"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04 Natural language (from-text)",
+      "description": "POST /tasks/from-text/. Any parser exception or invalid parser output gives 502 PARSER_ERROR with nothing saved; see TESTING.md for the manual simulation.",
+      "item": [
+        {
+          "name": "Rent on the 1st of every month",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/from-text/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"Remind me to pay rent on the 1st of every month\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "let b = {}; try { b = pm.response.json(); } catch (e) { /* non-JSON body: tests below fail */ }",
+                  "const t = b.task;",
+                  "const ymd = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;",
+                  "const now = new Date();",
+                  "const next1st = now.getDate() === 1 ? now : new Date(now.getFullYear(), now.getMonth() + 1, 1);",
+                  "pm.test('Title is readable (no underscores between letters)', () => { pm.expect(t.title).to.be.a('string').and.not.empty; pm.expect(t.title).to.not.match(/\\w_\\w_\\w/); });",
+                  "pm.test('Title mentions rent', () => pm.expect(t.title.toLowerCase()).to.include('rent'));",
+                  "pm.test('Description is the original text', () => pm.expect(t.description).to.eql('Remind me to pay rent on the 1st of every month'));",
+                  "pm.test('due_date is the next 1st of a month', () => pm.expect(t.due_date).to.eql(ymd(next1st)));",
+                  "pm.test('recurrence is monthly', () => pm.expect(t.recurrence).to.eql('monthly'));",
+                  "pm.collectionVariables.set('nlTaskId', t.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tomorrow",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/from-text/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"Call mom tomorrow\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "let b = {}; try { b = pm.response.json(); } catch (e) { /* non-JSON body: tests below fail */ }",
+                  "const ymd = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;",
+                  "const tm = new Date(); tm.setDate(tm.getDate() + 1);",
+                  "pm.test('due_date is tomorrow', () => pm.expect(b.task.due_date).to.eql(ymd(tm)));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Every day",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/from-text/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"Water the plants every day\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "let b = {}; try { b = pm.response.json(); } catch (e) { /* non-JSON body: tests below fail */ }",
+                  "pm.test('recurrence is daily', () => pm.expect(b.task.recurrence).to.eql('daily'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "No date phrase",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/from-text/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"Buy milk\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "let b = {}; try { b = pm.response.json(); } catch (e) { /* non-JSON body: tests below fail */ }",
+                  "pm.test('Title not empty', () => pm.expect(b.task.title).to.be.a('string').and.not.empty);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Very long text (title must stay <= 200 chars)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/from-text/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"Remember to really really really really really really really really really really really really really really really really really really really really really really really really really really really really really really really really really really really really really really really really really really really really really finish the report\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Never a 500', () => pm.expect(pm.response.code).to.be.oneOf([201, 502]));",
+                  "if (pm.response.code === 201) pm.test('Title <= 200 chars', () => pm.expect(pm.response.json().task.title.length).to.be.at.most(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Missing text (parser fails -> 502)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/from-text/",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 502', () => pm.response.to.have.status(502));",
+                  "pm.test('error.code is PARSER_ERROR', () => pm.expect(pm.response.json().error.code).to.eql('PARSER_ERROR'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Empty text (invalid output -> 502)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/from-text/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 502', () => pm.response.to.have.status(502));",
+                  "pm.test('error.code is PARSER_ERROR', () => pm.expect(pm.response.json().error.code).to.eql('PARSER_ERROR'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Whitespace text (invalid output -> 502)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/from-text/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"   \"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 502', () => pm.response.to.have.status(502));",
+                  "pm.test('error.code is PARSER_ERROR', () => pm.expect(pm.response.json().error.code).to.eql('PARSER_ERROR'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "text is a number (parser fails -> 502)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/from-text/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": 12345\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 502', () => pm.response.to.have.status(502));",
+                  "pm.test('error.code is PARSER_ERROR', () => pm.expect(pm.response.json().error.code).to.eql('PARSER_ERROR'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "text is a list (parser fails -> 502)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/from-text/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": [\n    \"pay\",\n    \"rent\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 502', () => pm.response.to.have.status(502));",
+                  "pm.test('error.code is PARSER_ERROR', () => pm.expect(pm.response.json().error.code).to.eql('PARSER_ERROR'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "05 Subtasks",
+      "description": "POST/GET /tasks/{id}/subtasks/ and the 'no subtask of a subtask' rule on every path.",
+      "item": [
+        {
+          "name": "Create subtask",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/{{taskId}}/subtasks/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Renew passport\",\n  \"description\": \"Before booking flights\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "let b = {}; try { b = pm.response.json(); } catch (e) { /* non-JSON body: tests below fail */ }",
+                  "pm.test('parent comes from the URL', () => pm.expect(b.task.parent).to.eql(Number(pm.collectionVariables.get('taskId'))));",
+                  "pm.collectionVariables.set('subtaskId', b.task.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List subtasks",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/tasks/{{taskId}}/subtasks/"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "let b = {}; try { b = pm.response.json(); } catch (e) { /* non-JSON body: tests below fail */ }",
+                  "const ids = b.subtasks.map(s => s.id);",
+                  "pm.test('Contains the new subtask', () => pm.expect(ids).to.include(Number(pm.collectionVariables.get('subtaskId'))));",
+                  "pm.test('Every item belongs to the parent', () => b.subtasks.forEach(s => pm.expect(s.parent).to.eql(Number(pm.collectionVariables.get('taskId')))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create a second subtask (list must handle many)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/{{taskId}}/subtasks/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Buy adapter\",\n  \"description\": \"Travel plug adapter\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List subtasks (2+ children)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/tasks/{{taskId}}/subtasks/"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "let b = {}; try { b = pm.response.json(); } catch (e) { /* non-JSON body: tests below fail */ }",
+                  "pm.test('At least 2 subtasks', () => pm.expect(b.subtasks.length).to.be.at.least(2));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create task with no subtasks",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Lonely\",\n  \"description\": \"Has no children\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('lonelyId', pm.response.json().task.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List subtasks when there are none",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/tasks/{{lonelyId}}/subtasks/"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "let b = {}; try { b = pm.response.json(); } catch (e) { /* non-JSON body: tests below fail */ }",
+                  "pm.test('Empty list, not 404', () => pm.expect(b.subtasks).to.eql([]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create subtask with invalid body",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/{{taskId}}/subtasks/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"\",\n  \"description\": \"x\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error.code is VALIDATION_ERROR', () => pm.expect(pm.response.json().error.code).to.eql('VALIDATION_ERROR'));",
+                  "pm.test('details mention field \"title\"', () => pm.expect(pm.response.json().error.details.map(d => d.field)).to.include('title'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Subtask of a subtask via /subtasks/",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/{{subtaskId}}/subtasks/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Too deep\",\n  \"description\": \"x\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error.code is VALIDATION_ERROR', () => pm.expect(pm.response.json().error.code).to.eql('VALIDATION_ERROR'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Subtask of a subtask via parent field on POST /tasks/",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Too deep\",\n  \"description\": \"x\",\n  \"parent\": {{subtaskId}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error.code is VALIDATION_ERROR', () => pm.expect(pm.response.json().error.code).to.eql('VALIDATION_ERROR'));",
+                  "pm.test('details mention field \"parent\"', () => pm.expect(pm.response.json().error.details.map(d => d.field)).to.include('parent'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Task cannot be its own parent (PATCH)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/{{lonelyId}}/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"parent\": {{lonelyId}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error.code is VALIDATION_ERROR', () => pm.expect(pm.response.json().error.code).to.eql('VALIDATION_ERROR'));",
+                  "pm.test('details mention field \"parent\"', () => pm.expect(pm.response.json().error.details.map(d => d.field)).to.include('parent'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Parent that does not exist",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Orphan\",\n  \"description\": \"x\",\n  \"parent\": 999999\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error.code is VALIDATION_ERROR', () => pm.expect(pm.response.json().error.code).to.eql('VALIDATION_ERROR'));",
+                  "pm.test('details mention field \"parent\"', () => pm.expect(pm.response.json().error.details.map(d => d.field)).to.include('parent'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "06 Breakdown",
+      "description": "POST /tasks/{id}/breakdown/.",
+      "item": [
+        {
+          "name": "Breakdown main task",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "bk-{{runId}}"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/{{taskId}}/breakdown/"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "let b = {}; try { b = pm.response.json(); } catch (e) { /* non-JSON body: tests below fail */ }",
+                  "pm.test('3 subtasks from \"Book flights, reserve hotel and pack bags\"', () => pm.expect(b.subtasks.length).to.eql(3));",
+                  "pm.test('Pieces are trimmed and non-empty', () => b.subtasks.forEach(s => { pm.expect(s.description.trim()).to.eql(s.description); pm.expect(s.description).to.not.be.empty; }));",
+                  "pm.test('All belong to parent', () => b.subtasks.forEach(s => pm.expect(s.parent).to.eql(Number(pm.collectionVariables.get('taskId')))));",
+                  "pm.collectionVariables.set('breakdownIds', JSON.stringify(b.subtasks.map(s => s.id)));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Breakdown replay with same key (no duplicates)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "bk-{{runId}}"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/{{taskId}}/breakdown/"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "let b = {}; try { b = pm.response.json(); } catch (e) { /* non-JSON body: tests below fail */ }",
+                  "pm.test('Same subtasks returned', () => pm.expect(b.subtasks.map(s => s.id)).to.eql(JSON.parse(pm.collectionVariables.get('breakdownIds'))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Breakdown created exactly 3 rows",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/tasks/{{taskId}}/subtasks/"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "let b = {}; try { b = pm.response.json(); } catch (e) { /* non-JSON body: tests below fail */ }",
+                  "const want = JSON.parse(pm.collectionVariables.get('breakdownIds'));",
+                  "pm.test('Each breakdown id appears once', () => want.forEach(id => pm.expect(b.subtasks.filter(s => s.id === id).length).to.eql(1)));",
+                  "pm.test('2 manual + 3 breakdown subtasks', () => pm.expect(b.subtasks.length).to.eql(5));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Breakdown a subtask",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/tasks/{{subtaskId}}/breakdown/"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error.code is VALIDATION_ERROR', () => pm.expect(pm.response.json().error.code).to.eql('VALIDATION_ERROR'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create task with 'and' inside a word",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Lunch\",\n  \"description\": \"Make a sandwich\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('sandwichId', pm.response.json().task.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Breakdown does not split inside words",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/tasks/{{sandwichId}}/breakdown/"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "let b = {}; try { b = pm.response.json(); } catch (e) { /* non-JSON body: tests below fail */ }",
+                  "pm.test('Only one piece', () => pm.expect(b.subtasks.length).to.eql(1));",
+                  "pm.test('Word kept whole', () => pm.expect(b.subtasks[0].description).to.eql('Make a sandwich'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "07 Idempotency",
+      "description": "Idempotency-Key on POST /tasks/, /tasks/from-text/ and /tasks/{id}/breakdown/.",
+      "item": [
+        {
+          "name": "Create with key",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "create-{{runId}}"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Idempotency demo {{runId}}\",\n  \"description\": \"Only one row must exist\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('idemTaskId', pm.response.json().task.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Replay same key + same body",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "create-{{runId}}"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Idempotency demo {{runId}}\",\n  \"description\": \"Only one row must exist\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Same task returned', () => pm.expect(pm.response.json().task.id).to.eql(Number(pm.collectionVariables.get('idemTaskId'))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Only one row exists",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/tasks/?search=Idempotency demo {{runId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Exactly one row', () => pm.expect(pm.response.json().count).to.eql(1));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Same key + different body",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "create-{{runId}}"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Something else\",\n  \"description\": \"Different body\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 422', () => pm.response.to.have.status(422));",
+                  "pm.test('error.code is IDEMPOTENCY_CONFLICT', () => pm.expect(pm.response.json().error.code).to.eql('IDEMPOTENCY_CONFLICT'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Failed request with a key",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "fix-{{runId}}"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"\",\n  \"description\": \"bad first try\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error.code is VALIDATION_ERROR', () => pm.expect(pm.response.json().error.code).to.eql('VALIDATION_ERROR'));",
+                  "pm.test('details mention field \"title\"', () => pm.expect(pm.response.json().error.details.map(d => d.field)).to.include('title'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Retry with same key after fixing input",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "fix-{{runId}}"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Fixed\",\n  \"description\": \"second try\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Failure was not cached', () => pm.expect(pm.response.json().task.title).to.eql('Fixed'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "from-text with key",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "nl-{{runId}}"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/from-text/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"Pay electricity bill tomorrow\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('idemNlId', pm.response.json().task.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "from-text replay (parser not called again)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "nl-{{runId}}"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/from-text/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"Pay electricity bill tomorrow\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Same task returned', () => pm.expect(pm.response.json().task.id).to.eql(Number(pm.collectionVariables.get('idemNlId'))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "from-text same key + different text",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "nl-{{runId}}"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/from-text/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"Pay water bill tomorrow\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 422', () => pm.response.to.have.status(422));",
+                  "pm.test('error.code is IDEMPOTENCY_CONFLICT', () => pm.expect(pm.response.json().error.code).to.eql('IDEMPOTENCY_CONFLICT'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Breakdown key reused on a different task",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "bk-{{runId}}"
+              }
+            ],
+            "url": "{{baseUrl}}/tasks/{{lonelyId}}/breakdown/"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 422', () => pm.response.to.have.status(422));",
+                  "pm.test('error.code is IDEMPOTENCY_CONFLICT', () => pm.expect(pm.response.json().error.code).to.eql('IDEMPOTENCY_CONFLICT'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "08 Filter, search, ordering, pagination",
+      "description": "Step 7. The first request seeds 12 tasks tagged seed<runId>.",
+      "item": [
+        {
+          "name": "Seed 12 tasks, then search them",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/tasks/?search=seed{{runId}}"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Seed 12 tasks tagged with this run, so counts below are exact.",
+                  "const base = pm.variables.get('baseUrl');",
+                  "const tag = 'seed' + pm.variables.get('runId');",
+                  "for (let i = 0; i < 12; i++) {",
+                  "  pm.sendRequest({",
+                  "    url: base + '/tasks/', method: 'POST',",
+                  "    header: { 'Content-Type': 'application/json' },",
+                  "    body: { mode: 'raw', raw: JSON.stringify({",
+                  "      title: `${tag} item ${String(i).padStart(2, '0')}`,",
+                  "      description: `seeded task ${i}`,",
+                  "      priority: i % 2 ? 'high' : 'low',",
+                  "      completed: i % 3 === 0",
+                  "    }) }",
+                  "  }, (err, res) => { if (err || res.code !== 201) console.error('seed failed', i, err || res.code); });",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('12 seeded tasks found', () => pm.expect(pm.response.json().count).to.eql(12));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Pagination page 1 has 10",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/tasks/?search=seed{{runId}}&page=1"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "let b = {}; try { b = pm.response.json(); } catch (e) { /* non-JSON body: tests below fail */ }",
+                  "pm.test('10 results', () => pm.expect(b.results.length).to.eql(10));",
+                  "pm.test('next link present', () => pm.expect(b.next).to.be.a('string'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Pagination page 2 has 2",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/tasks/?search=seed{{runId}}&page=2"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "let b = {}; try { b = pm.response.json(); } catch (e) { /* non-JSON body: tests below fail */ }",
+                  "pm.test('2 results', () => pm.expect(b.results.length).to.eql(2));",
+                  "pm.test('previous link present', () => pm.expect(b.previous).to.be.a('string'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Page past the end",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/tasks/?search=seed{{runId}}&page=999"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 404', () => pm.response.to.have.status(404));",
+                  "pm.test('error.code is NOT_FOUND', () => pm.expect(pm.response.json().error.code).to.eql('NOT_FOUND'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Filter completed=true",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/tasks/?search=seed{{runId}}&completed=true"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "let b = {}; try { b = pm.response.json(); } catch (e) { /* non-JSON body: tests below fail */ }",
+                  "pm.test('4 completed', () => pm.expect(b.count).to.eql(4));",
+                  "pm.test('All completed', () => b.results.forEach(t => pm.expect(t.completed).to.eql(true)));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Filter priority=high",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/tasks/?search=seed{{runId}}&priority=high"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "let b = {}; try { b = pm.response.json(); } catch (e) { /* non-JSON body: tests below fail */ }",
+                  "pm.test('6 high', () => pm.expect(b.count).to.eql(6));",
+                  "pm.test('All high', () => b.results.forEach(t => pm.expect(t.priority).to.eql('high')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Search matches description too",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/tasks/?search=Only one row must exist"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Found by description', () => pm.expect(pm.response.json().count).to.be.at.least(1));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ordering -created_at",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/tasks/?search=seed{{runId}}&ordering=-created_at"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "let b = {}; try { b = pm.response.json(); } catch (e) { /* non-JSON body: tests below fail */ }",
+                  "const isDesc = a => a.every((v, i) => i === 0 || a[i-1] >= v);",
+                  "pm.test('Newest first', () => pm.expect(isDesc(b.results.map(t => t.created_at))).to.eql(true));",
+                  "pm.test('Timestamps differ (DateTimeField, not DateField)', () => pm.expect(new Set(b.results.map(t => t.created_at)).size).to.be.above(1));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ordering title",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/tasks/?search=seed{{runId}}&ordering=title"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "let b = {}; try { b = pm.response.json(); } catch (e) { /* non-JSON body: tests below fail */ }",
+                  "const titles = b.results.map(t => t.title);",
+                  "pm.test('A to Z', () => pm.expect(titles).to.eql([...titles].sort()));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "All together: filter + search + ordering + page",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/tasks/?completed=false&priority=high&search=seed{{runId}}&ordering=-title&page=1"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "let b = {}; try { b = pm.response.json(); } catch (e) { /* non-JSON body: tests below fail */ }",
+                  "pm.test('4 match (odd i not divisible by 3)', () => pm.expect(b.count).to.eql(4));",
+                  "pm.test('Every result matches every filter', () => b.results.forEach(t => { pm.expect(t.completed).to.eql(false); pm.expect(t.priority).to.eql('high'); pm.expect(t.title).to.include('seed'); }));",
+                  "const titles = b.results.map(t => t.title);",
+                  "pm.test('Ordered Z to A', () => pm.expect(titles).to.eql([...titles].sort().reverse()));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Priority endpoint (high)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/priority/high"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "let b = {}; try { b = pm.response.json(); } catch (e) { /* non-JSON body: tests below fail */ }",
+                  "pm.test('Returns a list', () => pm.expect(b).to.be.an('array'));",
+                  "pm.test('All high', () => b.forEach(t => pm.expect(t.priority).to.eql('high')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Priority endpoint (invalid level)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/priority/urgent"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error.code is BAD_REQUEST', () => pm.expect(pm.response.json().error.code).to.eql('BAD_REQUEST'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "09 Cascade delete",
+      "description": "Deleting a parent deletes its subtasks. Also confirm in your DB client.",
+      "item": [
+        {
+          "name": "Delete parent",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/tasks/{{taskId}}/"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 or 204', () => pm.expect(pm.response.code).to.be.oneOf([200, 204]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Parent is gone",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/tasks/{{taskId}}/"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 404', () => pm.response.to.have.status(404));",
+                  "pm.test('error.code is NOT_FOUND', () => pm.expect(pm.response.json().error.code).to.eql('NOT_FOUND'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Subtask is gone (CASCADE)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/tasks/{{subtaskId}}/"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 404', () => pm.response.to.have.status(404));",
+                  "pm.test('error.code is NOT_FOUND', () => pm.expect(pm.response.json().error.code).to.eql('NOT_FOUND'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Breakdown subtask is gone (CASCADE)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/tasks/{{breakdownId0}}/"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('breakdownId0', JSON.parse(pm.collectionVariables.get('breakdownIds') || '[0]')[0]);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 404', () => pm.response.to.have.status(404));",
+                  "pm.test('error.code is NOT_FOUND', () => pm.expect(pm.response.json().error.code).to.eql('NOT_FOUND'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
