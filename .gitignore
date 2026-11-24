@@ -1,0 +1,20 @@
+# Secrets (never commit API keys)
+.env
+.env.*
+
+# Virtual environment
+.venv/
+venv/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Local database (the project uses Postgres; never commit SQLite files)
+db.sqlite3
+
+# macOS
+.DS_Store
+
+# Private review notes (not part of the submission)
+gap_report/
