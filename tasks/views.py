@@ -1,25 +1,22 @@
-import json
 import re
 from django.db import transaction
 from django.shortcuts import render
 from rest_framework.viewsets import ModelViewSet
 from rest_framework.response import Response
 from rest_framework.decorators import action
-from rest_framework.status import HTTP_201_CREATED, HTTP_400_BAD_REQUEST,  HTTP_200_OK, HTTP_404_NOT_FOUND, HTTP_422_UNPROCESSABLE_ENTITY
+from rest_framework.status import HTTP_201_CREATED, HTTP_400_BAD_REQUEST,  HTTP_200_OK, HTTP_404_NOT_FOUND, HTTP_422_UNPROCESSABLE_ENTITY, HTTP_502_BAD_GATEWAY
 from .serializers import TaskSerializer
 from .models import Task
 from .ai import parse_task_text
-
+from rest_framework.pagination import PageNumberPagination
+from rest_framework.filters import OrderingFilter, SearchFilter
+from django_filters.rest_framework.backends import DjangoFilterBackend
+from rest_framework.decorators import api_view
 # {key: {"path": ..., "body": ..., "response": {"data": ..., "status": ...}}}
 IDEMPOTENCY_HEADER_CACHE = {}
 
 
 def get_cached_response(request):
-    """
-    Returns (key, response).
-    - response is None  -> no replay; run the view normally.
-    - response is set   -> return it straight away (stored replay or 422).
-    """
     key = request.headers.get("Idempotency-Key")
     if key is None:
         return None, None
@@ -29,16 +26,17 @@ def get_cached_response(request):
         return key, None
 
     if cached["path"] != request.path or cached["body"] != request.data:
-        details_list = [f"Idempotency-Key '{key}' was already used with a different request"]
+        details_list = [{"field": "Idempotency-Key",
+                         "issue": f"'{key}' was already used with a different request"}]
         return key, err_response(
-            code="IDEMPOTENCY CONFLICT", message="Idempotency-Key reused with a different body",
+            code="IDEMPOTENCY_CONFLICT", message="Idempotency-Key reused with a different body",
             details=details_list, status=HTTP_422_UNPROCESSABLE_ENTITY)
 
     return key, Response(data=cached["response"]["data"], status=cached["response"]["status"])
 
 
 def cache_response(key, request, response):
-    """Store a successful response so a retry with the same key replays it."""
+
     if key is None:
         return
     IDEMPOTENCY_HEADER_CACHE[key] = {
@@ -46,7 +44,6 @@ def cache_response(key, request, response):
         "body": request.data.copy(),
         "response": {"data": response.data, "status": response.status_code},
     }
-
 
 
 def build_details_list(err_dict):
@@ -86,17 +83,17 @@ def err_response(code, message, details, status):
 
             "message": message,
 
-            "details": json.dumps(details)
+            "details": details
 
         }
 
     }, status=status)
 
+
 def break_down_task(task):
 
-    # Split on commas or the whole word "and" (\b = word boundary, so
-    # words like "handle" or "sand" are not split).
-    pieces = re.split(r",|\band\b", task.description, flags=re.IGNORECASE)
+    description = task.description.replace("and", ",")
+    pieces = description.split(",")
     return [
         {
             "title": task.title,
@@ -107,13 +104,19 @@ def break_down_task(task):
         for piece in pieces
         if piece.strip()
     ]
-    
-    
+
+class PaginationClass(PageNumberPagination):
+    page_size = 10
+
 class TaskModelView(ModelViewSet):
 
     queryset = Task.objects.all()
     serializer_class = TaskSerializer
-
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ["priority", "completed"]
+    search_fields = ["title", "description"]
+    pagination_class = PaginationClass
+    ordering_fields = ["created_at"]
     # list, retrieve, update, partial_update, destroy, create
 
     def create(self, request):
@@ -138,7 +141,7 @@ class TaskModelView(ModelViewSet):
         else:
             details_list = build_details_list(serializer.errors)
             error_response = err_response(
-                code="VALIDATION ERROR", message="Validation failed", details=details_list, status=HTTP_400_BAD_REQUEST)
+                code="VALIDATION_ERROR", message="Validation failed", details=details_list, status=HTTP_400_BAD_REQUEST)
             print(serializer.errors)
             return error_response
 
@@ -157,13 +160,13 @@ class TaskModelView(ModelViewSet):
         except Task.DoesNotExist:
             details_list = [f"Task ID: {pk} does not exist"]
             error_response = err_response(
-                code="NOT FOUND", message="Not found", details=details_list, status=HTTP_404_NOT_FOUND)
+                code="NOT_FOUND", message="Not found", details=details_list, status=HTTP_404_NOT_FOUND)
             return error_response
 
         except:
             details_list = [f"BAD REQUEST"]
             error_response = err_response(
-                code="BAD REQUEST", message="Bad request", details=details_list, status=HTTP_400_BAD_REQUEST)
+                code="BAD_REQUEST", message="Bad request", details=details_list, status=HTTP_400_BAD_REQUEST)
             return error_response
 
     def update(self, request, pk):
@@ -174,7 +177,7 @@ class TaskModelView(ModelViewSet):
         except Task.DoesNotExist:
             details_list = [f"Task ID: {pk} does not exist"]
             error_response = err_response(
-                code="NOT FOUND", message="Not found", details=details_list, status=HTTP_404_NOT_FOUND)
+                code="NOT_FOUND", message="Not found", details=details_list, status=HTTP_404_NOT_FOUND)
             return error_response
 
         serializer = TaskSerializer(task, data=request.data)
@@ -191,7 +194,7 @@ class TaskModelView(ModelViewSet):
         else:
             details_list = build_details_list(serializer.errors)
             error_response = err_response(
-                code="VALIDATION ERROR", message="Validation failed", details=details_list, status=HTTP_400_BAD_REQUEST)
+                code="VALIDATION_ERROR", message="Validation failed", details=details_list, status=HTTP_400_BAD_REQUEST)
             print(serializer.errors)
             return error_response
 
@@ -203,7 +206,7 @@ class TaskModelView(ModelViewSet):
         except Task.DoesNotExist:
             details_list = [f"Task ID: {pk} does not exist"]
             error_response = err_response(
-                code="NOT FOUND", message="Not found", details=details_list, status=HTTP_404_NOT_FOUND)
+                code="NOT_FOUND", message="Not found", details=details_list, status=HTTP_404_NOT_FOUND)
             return error_response
 
         serializer = TaskSerializer(task, data=request.data, partial=True)
@@ -220,7 +223,7 @@ class TaskModelView(ModelViewSet):
         else:
             details_list = build_details_list(serializer.errors)
             error_response = err_response(
-                code="VALIDATION ERROR", message="Validation failed", details=details_list, status=HTTP_400_BAD_REQUEST)
+                code="VALIDATION_ERROR", message="Validation failed", details=details_list, status=HTTP_400_BAD_REQUEST)
             print(serializer.errors)
             return error_response
 
@@ -239,13 +242,13 @@ class TaskModelView(ModelViewSet):
         except Task.DoesNotExist:
             details_list = [f"Task ID: {pk} does not exist"]
             error_response = err_response(
-                code="NOT FOUND", message="Not found", details=details_list, status=HTTP_404_NOT_FOUND)
+                code="NOT_FOUND", message="Not found", details=details_list, status=HTTP_404_NOT_FOUND)
             return error_response
 
         except:
             details_list = [f"BAD REQUEST"]
             error_response = err_response(
-                code="BAD REQUEST", message="Bad request", details=details_list, status=HTTP_400_BAD_REQUEST)
+                code="BAD_REQUEST", message="Bad request", details=details_list, status=HTTP_400_BAD_REQUEST)
             return error_response
 
     @action(detail=False, methods=["post"], url_path="from-text")
@@ -257,7 +260,13 @@ class TaskModelView(ModelViewSet):
             return cached
 
         text = request.data.get("text")
-        task_dict = parse_task_text(text)
+        try:
+            task_dict = parse_task_text(text)
+        except Exception as exc:
+            return err_response(
+                code="PARSER_ERROR", message="Parser failed",
+                details=[{"field": "text", "issue": str(exc)}], status=HTTP_502_BAD_GATEWAY)
+
         serializer = TaskSerializer(data=task_dict)
         if serializer.is_valid():
             task_obj = serializer.save()
@@ -271,53 +280,48 @@ class TaskModelView(ModelViewSet):
             cache_response(key, request, response)
             return response
         else:
+            # Parser output is untrusted: invalid output is a 502, and nothing is saved.
             details_list = build_details_list(serializer.errors)
             error_response = err_response(
-                code="VALIDATION ERROR", message="Validation failed", details=details_list, status=HTTP_400_BAD_REQUEST)
+                code="PARSER_ERROR", message="Parser returned invalid task data", details=details_list, status=HTTP_502_BAD_GATEWAY)
             print(serializer.errors)
             return error_response
 
-    @action(detail=True, methods=["post", "get"], url_path="substasks")
+    @action(detail=True, methods=["post", "get"], url_path="subtasks")
     def subtasks(self, request, pk):
 
         if request.method == "GET":
-            try:
-                tasks = Task.objects.get(parent=pk)
-                serializer = TaskSerializer(tasks, many=True)
-                if serializer.data["parent"] is not None:
-                    details_list = [f"BAD REQUEST"]
-                    error_response = err_response(
-                        code="BAD REQUEST", message="Bad request", details=details_list, status=HTTP_400_BAD_REQUEST)
-                    return error_response
-                
-                return Response(data={
-                    "msg": f"All the subtasks for parent ID: {pk}",
-                    "subtasks": serializer.data,
-                }, status=HTTP_200_OK)
-
-            except Task.DoesNotExist:
+            if not Task.objects.filter(id=pk).exists():
                 details_list = [f"Task ID: {pk} does not exist"]
                 error_response = err_response(
-                    code="NOT FOUND", message="Not found", details=details_list, status=HTTP_404_NOT_FOUND)
+                    code="NOT_FOUND", message="Not found", details=details_list, status=HTTP_404_NOT_FOUND)
                 return error_response
-            except:
-                details_list = [f"BAD REQUEST"]
-                error_response = err_response(
-                    code="BAD REQUEST", message="Bad request", details=details_list, status=HTTP_400_BAD_REQUEST)
-                return error_response
+
+            tasks = Task.objects.filter(parent=pk)
+            serializer = TaskSerializer(tasks, many=True)
+            return Response(data={
+                "msg": f"All the subtasks for parent ID: {pk}",
+                "subtasks": serializer.data,
+            }, status=HTTP_200_OK)
         else:
             try:
                 task = Task.objects.get(id=pk)
             except Task.DoesNotExist:
                 details_list = [f"Task ID: {pk} does not exist"]
                 error_response = err_response(
-                    code="NOT FOUND", message="Not found", details=details_list, status=HTTP_404_NOT_FOUND)
+                    code="NOT_FOUND", message="Not found", details=details_list, status=HTTP_404_NOT_FOUND)
                 return error_response
+
+            # save(parent=task) bypasses validate_parent, so check the rule here.
+            if task.parent_id is not None:
+                return err_response(
+                    code="VALIDATION_ERROR", message="Validation failed",
+                    details=[{"field": "parent", "issue": "a subtask cannot have subtasks"}],
+                    status=HTTP_400_BAD_REQUEST)
 
             serializer = TaskSerializer(data=request.data)
             if serializer.is_valid():
-                serializer.parent = pk
-                new_task = serializer.save()
+                new_task = serializer.save(parent=task)
                 return Response(
                     data={
                         "msg": f"Subtask ID: {new_task.id} with parent ID: {pk} created successfully",
@@ -328,10 +332,10 @@ class TaskModelView(ModelViewSet):
             else:
                 details_list = build_details_list(serializer.errors)
                 error_response = err_response(
-                    code="VALIDATION ERROR", message="Validation failed", details=details_list, status=HTTP_400_BAD_REQUEST)
+                    code="VALIDATION_ERROR", message="Validation failed", details=details_list, status=HTTP_400_BAD_REQUEST)
                 print(serializer.errors)
                 return error_response
-   
+
     @action(detail=True, methods=["post"], url_path="breakdown")
     def breakdown(self, request, pk):
 
@@ -344,18 +348,18 @@ class TaskModelView(ModelViewSet):
         except Task.DoesNotExist:
             details_list = [f"Parent Task ID: {pk} does not exist"]
             error_response = err_response(
-                code="NOT FOUND", message="Not found", details=details_list, status=HTTP_404_NOT_FOUND)
+                code="NOT_FOUND", message="Not found", details=details_list, status=HTTP_404_NOT_FOUND)
             return error_response
 
         serializer = TaskSerializer(data=break_down_task(task), many=True)
 
         if not serializer.is_valid():
-            details_list = [build_details_list(err) for err in serializer.errors if err]
+            details_list = [build_details_list(
+                err) for err in serializer.errors if err]
             error_response = err_response(
-                code="VALIDATION ERROR", message="Validation failed", details=details_list, status=HTTP_400_BAD_REQUEST)
+                code="VALIDATION_ERROR", message="Validation failed", details=details_list, status=HTTP_400_BAD_REQUEST)
             return error_response
 
-        # atomic: either every subtask is saved, or none are.
         with transaction.atomic():
             subtasks = serializer.save()
 
@@ -368,3 +372,19 @@ class TaskModelView(ModelViewSet):
         )
         cache_response(key, request, response)
         return response
+
+    def get_tasks_by_priority(self, request, level):
+        
+        if level not in ["low", "medium", "high"]:
+            details_list = [f"BAD REQUEST"]
+            error_response = err_response(
+                code="BAD_REQUEST", message="Bad request", details=details_list, status=HTTP_400_BAD_REQUEST)
+            return error_response
+        
+        tasks = Task.objects.filter(priority=level)
+        serializer = TaskSerializer(tasks, many=True)
+        return Response(
+            data=serializer.data,
+            status=HTTP_200_OK
+        )
+

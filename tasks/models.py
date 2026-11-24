@@ -17,5 +17,5 @@ class Task(models.Model):
     parent = models.ForeignKey("self", null=True,           blank=True,
                                on_delete=models.CASCADE, related_name="subtasks")
 
-    updated_at = models.DateField(auto_now=True)
-    created_at = models.DateField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
